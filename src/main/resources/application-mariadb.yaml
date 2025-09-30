@@ -1,0 +1,33 @@
+spring:
+  datasource:
+    url: jdbc:mariadb://a372be0564d58424b9f503dd696e766a-1897922469.ap-northeast-2.elb.amazonaws.com:3306/CLOUD?allowMultiQueries=true
+    driver-class-name: org.mariadb.jdbc.Driver
+    username: cloud
+    password: Skala25a!23$
+
+  jpa:
+    open-in-view: true
+    generate-ddl: true
+    database-platform: org.hibernate.dialect.MariaDBDialect
+    hibernate:
+      ddl-auto: update  # 무조건 테블이 있으면 삭제후 생성은 create (create-drop | update | create | none)
+    show-sql: false
+
+logging:
+  level:
+    root: INFO
+
+springdoc:
+  swagger-ui:
+    path: /${USER_NAME}/swagger/swagger-ui # Swagger UI 접속 경로 변경
+  api-docs:
+    path: /${USER_NAME}/swagger/swagger-docs
+
+developer:
+  owner:
+    name: prod-user
+    role: operator
+    level: cl3
+  team:
+    position: team-project
+    detail: "class3"
