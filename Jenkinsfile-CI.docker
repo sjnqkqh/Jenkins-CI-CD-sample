@@ -1,0 +1,148 @@
+pipeline {
+  agent any
+
+  environment {
+    // === 사용자 수정 영역 ===
+    GIT_URL                = 'https://github.com/qoqomi/myfirst-api-server.git'
+    GIT_BRANCH             = 'main'            // 또는 main
+    GIT_ID                 = 'skala-github-id'   // GitHub PAT credential ID
+    IMAGE_NAME             = 'sk077-myfirst-api-server'
+    // =======================
+    IMAGE_TAG              = '1.0.0'
+    IMAGE_REGISTRY_URL     = 'amdp-registry.skala-ai.com'
+    IMAGE_REGISTRY_PROJECT = 'skala25a'
+
+    DOCKER_CREDENTIAL_ID   = 'skala-image-registry-id'  // Harbor 인증 정보 ID
+    K8S_NAMESPACE          = 'skala-practice'
+  }
+
+  options {
+    disableConcurrentBuilds()
+    timestamps()
+  }
+
+  stages {
+    stage('Clone Repository') {
+      steps {
+        echo 'Clone Repository'
+        git branch: "${GIT_BRANCH}", url: "${GIT_URL}", credentialsId: "${GIT_ID}"
+        sh 'ls -al'
+      }
+    }
+
+    stage('Build with Maven') {
+      steps {
+        echo 'Build with Maven'
+        sh 'mvn clean package -DskipTests'
+        sh 'ls -al'
+      }
+    }
+
+    // 태그/이미지 경로 계산 (메타)
+    stage('Compute Image Meta') {
+      steps {
+        script {
+          def hashcode = sh(script: "date +%s%N | sha256sum | cut -c1-12", returnStdout: true).trim()
+          env.FINAL_IMAGE_TAG = "${IMAGE_TAG}-${hashcode}"
+          env.IMAGE_REGISTRY  = "${env.IMAGE_REGISTRY_URL}/${env.IMAGE_REGISTRY_PROJECT}"
+          env.REG_HOST        = env.IMAGE_REGISTRY_URL
+          env.IMAGE_REF       = "${env.IMAGE_REGISTRY}/${IMAGE_NAME}:${env.FINAL_IMAGE_TAG}"
+
+          echo "REG_HOST: ${env.REG_HOST}"
+          echo "IMAGE_REF: ${env.IMAGE_REF}"
+        }
+      }
+    }
+
+    // 로그인/빌드/푸시/정리
+    stage('Image Build & Push (docker)') {
+        steps {
+            script {
+                docker.withRegistry("https://${IMAGE_REGISTRY}", "${DOCKER_CREDENTIAL_ID}") {
+                    def appImage = docker.build("${IMAGE_REF}", "--platform=linux/amd64 .")
+                    appImage.push()
+                }
+            }
+        }
+    }
+
+    // k8s 리소스 파일(deploy.yaml) 수정
+    stage('Update K8s Manifests') {
+      steps {
+        script {
+          echo '=== Update deploy.yaml with new image tag ==='
+        }
+        sh '''
+            set -eux
+            test -f ./k8s/deploy.yaml
+
+            echo "--- BEFORE ---"
+            grep -n 'image:' ./k8s/deploy.yaml || true
+
+            # IMAGE_REGISTRY/IMAGE_NAME 패턴의 태그를 FINAL_IMAGE_TAG 로 치환
+            sed -Ei "s#(image:[[:space:]]*$IMAGE_REGISTRY/$IMAGE_NAME)[^[:space:]]+#\\1:$FINAL_IMAGE_TAG#" ./k8s/deploy.yaml
+
+            echo "--- AFTER ---"
+            grep -n 'image:' ./k8s/deploy.yaml || true
+        '''
+      }
+    }
+
+    // deployment yaml의 Git 커밋/푸시
+    stage('Git Commit & Push (gitops)') {
+      steps {
+        script {
+          def gitRepoPath = env.GIT_URL.replaceFirst(/^https?:\/\//, '')
+          echo "gitRepoPath: ${gitRepoPath}"
+        }
+
+        sh '''
+            set -eux
+            git config --global --add safe.directory '*'
+            git config --global user.name "skala-gitops"
+            git config --global user.email "skala@skala-ai.com"
+
+            git fetch origin || true
+            cp ./k8s/deploy.yaml ./k8s/deploy.yaml.backup
+
+            # gitops 브랜치 체크아웃 (있으면 강제 이동, 없으면 origin/gitops 기준 생성 또는 로컬 생성)
+            if git show-ref --verify --quiet refs/heads/gitops || git show-ref --verify --quiet refs/remotes/origin/gitops; then
+                git checkout -f gitops || git checkout -B gitops origin/gitops
+            else
+                git checkout -b gitops
+            fi
+
+            # 백업본을 현재 브랜치로 반영 후 다시 치환(이중확인)
+            cp ./k8s/deploy.yaml.backup ./k8s/deploy.yaml
+            sed -Ei "s#(image:[[:space:]]*${IMAGE_REGISTRY}/${IMAGE_NAME})[^[:space:]]+#\\1:${FINAL_IMAGE_TAG}#" ./k8s/deploy.yaml
+            rm -f ./k8s/deploy.yaml.backup
+
+            git add ./k8s/deploy.yaml || true
+            git status
+        '''
+
+        withCredentials([usernamePassword(
+          credentialsId: "${env.GIT_ID}",
+          usernameVariable: 'GIT_PUSH_USER',
+          passwordVariable: 'GIT_PUSH_PASSWORD'
+        )]) {
+          script {
+            env.GIT_REPO_PATH = env.GIT_URL.replaceFirst(/^https?:\/\//, '')
+            sh '''
+                set -eux
+                if ! git diff --cached --quiet; then
+                    git commit -m "[AUTO] Update deploy.yaml with image $FINAL_IMAGE_TAG"
+                    git remote set-url origin https://$GIT_PUSH_USER:$GIT_PUSH_PASSWORD@$GIT_REPO_PATH
+                    git push origin gitops --force
+                    echo "Pushed to gitops"
+                else
+                    echo "No changes to commit"
+                fi
+            '''
+          }
+        }
+      }
+    }
+  }
+}
+
