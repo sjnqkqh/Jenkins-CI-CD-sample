@@ -14,7 +14,7 @@ spec:
         prometheus.io/scrape: 'true'
         prometheus.io/port: '8080'
         prometheus.io/path: '/actuator/prometheus'
-        update: 95f678a3
+        update: 8aae731d
       labels:
         app: sk077-myfirst-api-server
     spec:

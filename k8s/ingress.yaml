@@ -8,17 +8,17 @@ metadata:
 spec:
   ingressClassName: public-nginx
   rules:
-    - host: sk077-ingress.skala25a.project.skala-ai.com
-      http:
-        paths:
-          - backend:
-              service:
-                name: sk077-myfirst-api-server
-                port:
-                  number: 8080
-            path: /
-            pathType: Prefix
+  - host: sk077-ingress.skala25a.project.skala-ai.com
+    http:
+      paths:
+      - backend:
+          service:
+            name: sk077-myfirst-api-server
+            port:
+              number: 8080
+        path: /
+        pathType: Prefix
   tls:
-    - hosts:
-        - "sk077-ingress.skala25a.project.skala-ai.com"
-      secretName: sk077-ingress-project-tls-cert
+  - hosts:
+    - 'sk077-ingress.skala25a.project.skala-ai.com'
+    secretName: sk077-ingress-project-tls-cert
