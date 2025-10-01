@@ -3,7 +3,7 @@ pipeline {
 
   environment {
     // === 사용자 수정 영역 ===
-    GIT_URL                = 'git@github.com:qoqomi/myfirst-api-server.git'
+    GIT_URL                = 'https://github.com/qoqomi/myfirst-api-server.git'
     GIT_BRANCH             = 'main'            // 또는 main
     GIT_ID                 = 'skala-github-id'   // GitHub PAT credential ID
     IMAGE_NAME             = 'sk077-myfirst-api-server'    
