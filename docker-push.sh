@@ -1,6 +1,6 @@
 #!/bin/bash
 
-NAME=sk199
+NAME=sk077
 IMAGE_NAME="myfirst-api-server"
 VERSION="1.0.0"
 
