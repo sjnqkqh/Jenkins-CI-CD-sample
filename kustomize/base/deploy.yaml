@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: myfirst-api-server
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: myfirst-api-server
+  template:
+    metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/actuator/prometheus"
+        update: 0022b4527ab14cda05f291be833cc65d
+      labels:
+        app: my-app
+    spec:
+      serviceAccountName: default
+      containers:
+        - name: myfirst-api-server
+          image: amdp-registry.skala-ai.com/skala25a/sk077-myfirst-api-server:1.0.0
+          imagePullPolicy: Always

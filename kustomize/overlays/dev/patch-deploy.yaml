@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: myfirst-api-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: myfirst-api-server
+  template:
+    metadata:
+      labels:
+        app: myfirst-api-server
+    spec:
+      containers:
+        - name: myfirst-api-server
+          env:
+            - name: NAMESPACE
+              value: skala-practice
+          volumeMounts:
+            - name: app-config
+              mountPath: /app/config
+              readOnly: true
+      volumes:
+        - name: app-config
+          configMap:
+            name: app-config

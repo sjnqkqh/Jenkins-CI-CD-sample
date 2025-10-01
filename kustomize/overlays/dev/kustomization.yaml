@@ -1,0 +1,48 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namePrefix: sk077-
+
+resources:
+  - ../../base
+
+labels:
+  - pairs:
+      selection: sk077
+    includeSelectors: true
+  - pairs:
+      app.kubernetes.io/managed-by: kustomize
+      env: dev
+
+commonAnnotations:
+  contact: "himang10@sk.com"
+
+configMapGenerator:
+  - name: app-config
+    files:
+      - application-local.yaml=./application-local.yaml
+    options:
+      disableNameSuffixHash: false
+
+patches: # base 이름 기준
+  - path: patch-deploy.yaml
+  - path: patch-service.yaml
+  - path: add-env.yaml
+    target:
+      kind: Deployment
+      name: myfirst-api-server # base 이름 기준
+  - path: replace-images.yaml
+    target:
+      kind: Deployment
+      name: myfirst-api-server # base 이름 기준
+  - path: replace-replicas.yaml
+    target:
+      kind: Deployment
+      name: myfirst-api-server # base 이름 기준
+  - path: remove-annotation.yaml
+    target:
+      kind: Deployment
+      name: myfirst-api-server # base 이름 기준
+images:
+  - name: amdp-registry.skala-ai.com/skala25a/sk077-myfirst-api-server
+    newTag: "1.0.0.spring-kaniko-kube"

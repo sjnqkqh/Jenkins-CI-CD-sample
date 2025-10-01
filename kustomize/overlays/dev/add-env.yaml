@@ -1,0 +1,10 @@
+- op: add
+  path: /spec/template/spec/containers/0/env/-
+  value: 
+    name: USER_NAME
+    value: "SKALA"
+- op: add
+  path: /spec/template/spec/containers/0/env/-
+  value: 
+    name: SPRING_PROFILES_ACTIVE
+    value: "local"

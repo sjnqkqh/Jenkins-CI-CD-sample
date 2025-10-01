@@ -1,0 +1,139 @@
+apiVersion: v1
+data:
+  application-local.yaml: |
+    spring:
+      datasource:
+        url: jdbc:h2:mem:testdb
+        driverClassName: org.h2.Driver
+        username: admin
+        password: password
+      h2:
+        console:
+          enabled: true
+          path: /h2-console
+      jpa:
+        database-platform: org.hibernate.dialect.H2Dialect
+        hibernate:
+          ddl-auto: create-drop
+        show-sql: true
+        properties:
+          hibernate:
+            format_sql: true
+    logging:
+      level:
+        root: DEBUG
+
+    developer:
+      owner:
+        name: local-operator
+        role: local-kustomize-operator
+        level: local-level
+      team:
+        position: team-project
+        detail: "class3"
+
+    management:
+      server:
+        port: 8080 # Actuator 포트 설정
+      endpoints:
+        web:
+          exposure:
+            include: "*" # Prometheus endpoint 노출
+      endpoint:
+        health:
+          probes:
+            enabled: true # LivenessState, ReadinessState 활성화
+      health:
+        livenessState:
+            enabled: true # LivenessState 활성화
+        readinessState:
+            enabled: true # ReadinessState 활성화
+      metrics:
+        enable:
+          all: true # 모든 기본 메트릭 활성화
+kind: ConfigMap
+metadata:
+  annotations:
+    contact: himang10@sk.com
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    env: dev
+    selection: sk077
+  name: sk077-app-config-dkmm5c696t
+---
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    contact: himang10@sk.com
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    env: dev
+    selection: sk077
+  name: sk077-myfirst-api-server
+spec:
+  ports:
+  - name: svc1
+    port: 9090
+    targetPort: 9090
+  - name: svc2
+    port: 8888
+    targetPort: 8888
+  - name: http
+    port: 8080
+    protocol: TCP
+    targetPort: 8080
+  - name: mgmt
+    port: 8081
+    protocol: TCP
+    targetPort: 8081
+  selector:
+    app: myfirst-api-server
+    selection: sk077
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    contact: himang10@sk.com
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    env: dev
+    selection: sk077
+  name: sk077-myfirst-api-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: myfirst-api-server
+      selection: sk077
+  template:
+    metadata:
+      annotations:
+        contact: himang10@sk.com
+        update: 0022b4527ab14cda05f291be833cc65d
+      labels:
+        app: myfirst-api-server
+        selection: sk077
+    spec:
+      containers:
+      - env:
+        - name: NAMESPACE
+          value: skala-practice
+        - name: USER_NAME
+          value: SKALA
+        - name: SPRING_PROFILES_ACTIVE
+          value: local
+        image: amdp-registry.skala-ai.com/skala25a/sk077-myfirst-api-server:1.0.0.spring-kaniko-kube
+        imagePullPolicy: IfNotPresent
+        name: myfirst-api-server
+        volumeMounts:
+        - mountPath: /app/config
+          name: app-config
+          readOnly: true
+      serviceAccountName: default
+      volumes:
+      - configMap:
+          name: sk077-app-config-dkmm5c696t
+        name: app-config

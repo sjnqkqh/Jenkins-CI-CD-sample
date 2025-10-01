@@ -1,0 +1,50 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:testdb
+    driverClassName: org.h2.Driver
+    username: admin
+    password: password
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+  jpa:
+    database-platform: org.hibernate.dialect.H2Dialect
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+logging:
+  level:
+    root: DEBUG
+
+developer:
+  owner:
+    name: local-operator
+    role: local-kustomize-operator
+    level: local-level
+  team:
+    position: team-project
+    detail: "class3"
+
+management:
+  server:
+    port: 8080 # Actuator 포트 설정
+  endpoints:
+    web:
+      exposure:
+        include: "*" # Prometheus endpoint 노출
+  endpoint:
+    health:
+      probes:
+        enabled: true # LivenessState, ReadinessState 활성화
+  health:
+    livenessState:
+        enabled: true # LivenessState 활성화
+    readinessState:
+        enabled: true # ReadinessState 활성화
+  metrics:
+    enable:
+      all: true # 모든 기본 메트릭 활성화
