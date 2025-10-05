@@ -1,5 +1,6 @@
 pipeline {
   agent any
+
   environment {
     // === Git 설정 ===
     GIT_URL     = 'https://github.com/sjnqkqh/Jenkins-CI-CD-sample'
@@ -19,7 +20,7 @@ pipeline {
 
   options {
     disableConcurrentBuilds()  // 동시 빌드 방지
-
+    timestamps()               // 로그에 타임스탬프 추가
   }
 
   stages {
@@ -58,25 +59,6 @@ pipeline {
         }
       }
     }
-def buildPod = """
-apiVersion: v1
-kind: Pod
-spec:
-  serviceAccountName: jenkins-agent
-  containers:
-  - name: maven
-    image: maven:3.9-eclipse-temurin-17
-    command: ['cat']
-    tty: true
-"""
-podTemplate(yaml: buildPod) {
-  node(POD_LABEL) {
-    checkout scm  // Jenkinsfile 레포 체크아웃
-    container('maven') {
-      sh 'mvn -v'
-      sh 'mvn clean package -DskipTests'
-    }
-    // 이후 Kaniko 단계…
 
     stage('Build & Push with Kaniko') {
       steps {
