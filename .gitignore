@@ -1,0 +1,105 @@
+### Java ###
+*.class
+*.jar
+*.war
+*.ear
+*.nar
+*.tar.gz
+*.rar
+hs_err_pid*
+
+### Compiled bytecode ###
+*.log
+*.ctxt
+
+### Package Files ###
+target/
+build/
+out/
+
+### Maven ###
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+dependency-reduced-pom.xml
+.mvn/timing.properties
+.mvn/wrapper/maven-wrapper.jar
+.mvn/wrapper/maven-wrapper.properties
+
+### Spring Boot ###
+### Logs, temp files, etc.
+*.log
+spring.log
+*.tmp
+*.pid
+*.seed
+*.key
+*.keystore
+*.pem
+
+### Application runtime data ###
+!src/main/resources/
+!src/test/resources/
+*.db
+*.h2.db
+*.mv.db
+
+### IDE ###
+# IntelliJ
+.idea/
+*.iml
+*.ipr
+*.iws
+out/
+
+# Eclipse
+.project
+.classpath
+.settings/
+bin/
+
+# VSCode
+.vscode/
+
+### OS-specific ###
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+
+### Docker / Kubernetes ###
+/docker-compose.override.yml
+*.env
+.env.local
+.env.*
+!.env.example
+*.swp
+
+### Test artifacts ###
+*.coverage
+*.lcov
+*.hprof
+
+### CI/CD ###
+/jenkins/
+logs/
+.coverage/
+test-output/
+surefire-reports/
+
+### Node (프론트엔드 포함 시) ###
+node_modules/
+dist/
+npm-debug.log
+yarn-error.log
