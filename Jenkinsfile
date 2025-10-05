@@ -1,6 +1,6 @@
 pipeline {
   agent any
-  tools { maven 'maven-3.9' }
+
   environment {
     // === Git 설정 ===
     GIT_URL     = 'https://github.com/sjnqkqh/Jenkins-CI-CD-sample'
@@ -34,6 +34,12 @@ pipeline {
     }
 
     stage('Build with Maven') {
+    agent {
+        docker {
+          image 'maven:3.9-eclipse-temurin-17'
+          args '-v $HOME/.m2:/root/.m2'  // Maven 캐시 재사용
+        }
+      }
       steps {
         echo 'Build with Maven'
         sh 'mvn -v'
