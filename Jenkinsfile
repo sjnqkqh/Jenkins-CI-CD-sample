@@ -20,7 +20,7 @@ pipeline {
 
   options {
     disableConcurrentBuilds()  // 동시 빌드 방지
-    timestamps()               // 로그에 타임스탬프 추가
+
   }
 
   stages {
