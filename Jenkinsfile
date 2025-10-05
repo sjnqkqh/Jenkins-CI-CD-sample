@@ -35,11 +35,6 @@ pipeline {
 
     stage('Build with Maven') {
     agent {
-        docker {
-          image 'maven:3.9-eclipse-temurin-17'
-          args '-v $HOME/.m2:/root/.m2'  // Maven 캐시 재사용
-        }
-      }
       steps {
         echo 'Build with Maven'
         sh 'mvn -v'
