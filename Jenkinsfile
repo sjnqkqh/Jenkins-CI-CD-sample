@@ -33,17 +33,13 @@ pipeline {
       }
     }
 
-  stage('Build with Maven') {
-    steps {
-      script {
+    stage('Build with Maven') {
+      steps {
         echo 'Build with Maven'
-        sh "${mvnHome}/bin/mvn -v"
-        sh "${mvnHome}/bin/mvn clean package -DskipTests"
-        sh "ls -al target/"
+        sh 'mvn clean package -DskipTests'
+        sh 'ls -al target/'
       }
     }
-  }
-
 
     stage('Compute Image Tag') {
       steps {
