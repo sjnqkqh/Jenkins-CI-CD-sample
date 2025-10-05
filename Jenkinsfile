@@ -34,7 +34,6 @@ pipeline {
     }
 
     stage('Build with Maven') {
-    agent {
       steps {
         echo 'Build with Maven'
         sh 'mvn -v'
