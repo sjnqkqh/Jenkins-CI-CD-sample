@@ -1,6 +1,6 @@
 pipeline {
   agent any
-
+  tools { maven 'maven-3.9' }
   environment {
     // === Git 설정 ===
     GIT_URL     = 'https://github.com/sjnqkqh/Jenkins-CI-CD-sample'
