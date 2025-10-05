@@ -2,31 +2,34 @@ pipeline {
   agent any
 
   environment {
-    // === 사용자 수정 영역 ===
-    GIT_URL                = 'https://github.com/qoqomi/myfirst-api-server.git'
-    GIT_BRANCH             = 'main'            // 또는 main
-    GIT_ID                 = 'skala-github-id'   // GitHub PAT credential ID
-    IMAGE_NAME             = 'sk077-myfirst-api-server'    
-    // =======================
-    IMAGE_TAG              = '1.0.0'    
-    IMAGE_REGISTRY_URL     = 'amdp-registry.skala-ai.com'
-    IMAGE_REGISTRY_PROJECT = 'skala25a'
+    // === Git 설정 ===
+    GIT_URL     = 'https://github.com/sjnqkqh/Jenkins-CI-CD-sample'
+    GIT_BRANCH  = 'main'
+    GIT_ID      = 'github-pat-credential'  // GitHub PAT Credential ID
 
-    DOCKER_CREDENTIAL_ID   = 'skala-image-registry-id'  // Harbor 인증 정보 ID
-    K8S_NAMESPACE          = 'skala-practice'
+    // === 이미지 설정 ===
+    IMAGE_NAME  = 'sk077-myfirst-api-server'
+    IMAGE_TAG   = '1.0.0'
+    IMAGE_REGISTRY_URL = 'amdp-registry.skala-ai.com'
+    IMAGE_REGISTRY_PROJECT = 'skala25a'
+    IMAGE_REGISTRY = "${IMAGE_REGISTRY_URL}/${IMAGE_REGISTRY_PROJECT}"
+
+    // === Kubernetes 설정 ===
+    K8S_NAMESPACE = 'skala-practice'
   }
 
   options {
-    disableConcurrentBuilds()
-    timestamps()
+    disableConcurrentBuilds()  // 동시 빌드 방지
+    timestamps()               // 로그에 타임스탬프 추가
   }
 
   stages {
     stage('Clone Repository') {
       steps {
         echo 'Clone Repository'
-        git branch: "${GIT_BRANCH}", url: "${GIT_URL}", credentialsId: "${GIT_ID}"
-        sh 'ls -al'
+        git branch: "${GIT_BRANCH}",
+            url: "${GIT_URL}",
+            credentialsId: "${GIT_ID}"
       }
     }
 
@@ -34,65 +37,114 @@ pipeline {
       steps {
         echo 'Build with Maven'
         sh 'mvn clean package -DskipTests'
-        sh 'ls -al'
+        sh 'ls -al target/'
       }
     }
 
-    // 태그/이미지 경로 계산 (메타)
-    stage('Compute Image Meta') {
+    stage('Compute Image Tag') {
       steps {
         script {
-          def hashcode = sh(script: "date +%s%N | sha256sum | cut -c1-12", returnStdout: true).trim()
-          env.FINAL_IMAGE_TAG = "${IMAGE_TAG}-${hashcode}"
-          env.IMAGE_REGISTRY  = "${env.IMAGE_REGISTRY_URL}/${env.IMAGE_REGISTRY_PROJECT}"
-          env.REG_HOST        = env.IMAGE_REGISTRY_URL
-          env.IMAGE_REF       = "${env.IMAGE_REGISTRY}/${IMAGE_NAME}:${env.FINAL_IMAGE_TAG}"
+          // 타임스탬프 기반 고유 태그 생성
+          def timestamp = sh(
+            script: "date +%Y%m%d-%H%M%S",
+            returnStdout: true
+          ).trim()
 
-          echo "REG_HOST: ${env.REG_HOST}"
-          echo "IMAGE_REF: ${env.IMAGE_REF}"
+          env.FINAL_IMAGE_TAG = "${IMAGE_TAG}-${timestamp}"
+          env.IMAGE_REF = "${IMAGE_REGISTRY}/${IMAGE_NAME}:${FINAL_IMAGE_TAG}"
+
+          echo "=========================================="
+          echo "Image Reference: ${IMAGE_REF}"
+          echo "=========================================="
         }
       }
     }
 
+    stage('Build & Push with Kaniko') {
+      steps {
+        script {
+          def kanikoYaml = """
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kaniko
+spec:
+  serviceAccountName: jenkins-agent
+  containers:
+  - name: kaniko
+    image: gcr.io/kaniko-project/executor:v1.23.0-debug
+    imagePullPolicy: Always
+    command:
+    - /busybox/cat
+    tty: true
+    volumeMounts:
+    - name: docker-config
+      mountPath: /kaniko/.docker
+  volumes:
+  - name: docker-config
+    secret:
+      secretName: harbor-registry-secret
+      items:
+      - key: .dockerconfigjson
+        path: config.json
+"""
 
-    // 로그인/빌드/푸시/정리
-    // 하버에 푸시하는거임\
-    // docker -> 데몬한테 요청 및 실행
-    // buildah === Kaniko
-    // 
-    stage('Image Build & Push (docker)') {
-        steps {
-            script {
-                docker.withRegistry("https://${IMAGE_REGISTRY}", "${DOCKER_CREDENTIAL_ID}") {
-                    def appImage = docker.build("${IMAGE_REF}", "--platform=linux/amd64 .")
-                    appImage.push()
-                }
+          podTemplate(yaml: kanikoYaml) {
+            node(POD_LABEL) {
+              // Git 소스 체크아웃
+              checkout scm
+
+              container('kaniko') {
+                sh """
+                  /kaniko/executor \\
+                    --context=\$(pwd) \\
+                    --dockerfile=Dockerfile \\
+                    --destination=${IMAGE_REF} \\
+                    --cache=true \\
+                    --cache-repo=${IMAGE_REGISTRY}/${IMAGE_NAME}-cache \\
+                    --snapshot-mode=redo \\
+                    --log-format=text \\
+                    --verbosity=info
+                """
+              }
             }
+          }
         }
+      }
     }
 
-    // k8s 리소스 파일(deploy.yaml) 수정 및 배포
     stage('Deploy to Kubernetes') {
       steps {
         sh '''
-            set -eux
-            test -f ./k8s/deploy.yaml
+          set -eux
 
-            echo "--- BEFORE ---"
-            grep -n 'image:' ./k8s/deploy.yaml || true
+          echo "Updating image in k8s/deploy.yaml..."
 
-            # IMAGE_REGISTRY/IMAGE_NAME 패턴의 태그를 FINAL_IMAGE_TAG 로 치환
-            sed -Ei "s#(image:[[:space:]]*$IMAGE_REGISTRY/$IMAGE_NAME)[^[:space:]]+#\\1:$FINAL_IMAGE_TAG#" ./k8s/deploy.yaml
+          # 이미지 태그 업데이트 (sed를 사용한 in-place 치환)
+          sed -Ei "s#(image:[[:space:]]*$IMAGE_REGISTRY/$IMAGE_NAME)[^[:space:]]+#\\1:$FINAL_IMAGE_TAG#" ./k8s/deploy.yaml
 
-            echo "--- AFTER ---"
-            grep -n 'image:' ./k8s/deploy.yaml || true
+          echo "--- Updated deploy.yaml ---"
+          grep 'image:' ./k8s/deploy.yaml
 
-            kubectl apply -n ${K8S_NAMESPACE} -f ./k8s
-            kubectl rollout status -n ${K8S_NAMESPACE} deployment/${IMAGE_NAME}
+          # Kubernetes 배포
+          kubectl apply -n ${K8S_NAMESPACE} -f ./k8s
+
+          # 롤아웃 완료 대기 (타임아웃 5분)
+          kubectl rollout status -n ${K8S_NAMESPACE} deployment/${IMAGE_NAME} --timeout=5m
         '''
       }
     }
+  }
 
+  post {
+    always {
+      echo 'Pipeline finished!'
+    }
+    success {
+      echo '✅ Build and Deployment succeeded!'
+    }
+    failure {
+      echo '❌ Build or Deployment failed!'
+    }
   }
 }
-
