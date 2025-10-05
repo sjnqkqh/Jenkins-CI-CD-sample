@@ -36,9 +36,6 @@ pipeline {
   stage('Build with Maven') {
     steps {
       script {
-        // Jenkins에 설정한 Maven 도구 사용
-        def mvnHome = tool name: 'Maven-3.9', type: 'maven'
-
         echo 'Build with Maven'
         sh "${mvnHome}/bin/mvn -v"
         sh "${mvnHome}/bin/mvn clean package -DskipTests"
@@ -46,6 +43,8 @@ pipeline {
       }
     }
   }
+
+
     stage('Compute Image Tag') {
       steps {
         script {
