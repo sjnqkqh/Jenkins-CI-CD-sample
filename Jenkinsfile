@@ -51,7 +51,7 @@ spec:
     - name: docker-config
       mountPath: /kaniko/.docker
   - name: kubectl
-    image: bitnami/kubectl:latest
+    image: alpine/k8s:1.28.0
     command:
     - cat
     tty: true
