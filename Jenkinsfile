@@ -5,12 +5,12 @@ pipeline {
     // === Git 설정 ===
     GIT_URL     = 'https://github.com/sjnqkqh/Jenkins-CI-CD-sample'
     GIT_BRANCH  = 'main'
-    GIT_ID      = 'github-pat-credential'  // Jenkins Credentials ID (PAT는 UI에 저장)
+    GIT_ID      = 'github-pat-credential'  // Jenkins Credentials ID (PAT은 Jenkins에 보관)
 
     // === 이미지 설정 ===
     IMAGE_NAME  = 'sk077-myfirst-api-server'
     IMAGE_TAG   = '1.0.0'
-    IMAGE_REGISTRY_URL = 'amdp-registry.skala-ai.com'
+    IMAGE_REGISTRY_URL     = 'amdp-registry.skala-ai.com'
     IMAGE_REGISTRY_PROJECT = 'skala25a'
     IMAGE_REGISTRY = "${IMAGE_REGISTRY_URL}/${IMAGE_REGISTRY_PROJECT}"
 
@@ -23,10 +23,10 @@ pipeline {
   }
 
   stages {
-    stage('Build / Push / Deploy (K8s Pod)') {
+    stage('Build / Push / Deploy (in one K8s Pod)') {
       steps {
         script {
-          // 하나의 Pod에 maven/kaniko/kubectl 3컨테이너를 구성
+          // ▶ 한 Pod에 maven / kaniko / kubectl 컨테이너 구성
           def buildPod = """
 apiVersion: v1
 kind: Pod
@@ -37,23 +37,28 @@ spec:
   containers:
   - name: maven
     image: maven:3.9-eclipse-temurin-17
-    command: ['cat']
+    imagePullPolicy: Always
+    command: ['bash', '-lc', 'while true; do sleep 3600; done']
     tty: true
     volumeMounts:
     - name: maven-cache
       mountPath: /root/.m2
+
   - name: kaniko
     image: gcr.io/kaniko-project/executor:v1.23.0-debug
-    command: ['cat']
+    imagePullPolicy: Always
+    command: ['/busybox/sh', '-c', 'sleep 3600']
     tty: true
     volumeMounts:
     - name: docker-config
       mountPath: /kaniko/.docker
 
   - name: kubectl
-    image: registry.k8s.io/kubectl:v1.30.4   # ★ 공식 kubectl 이미지 권장
-    command: ['cat']
+    image: bitnami/kubectl:1.30.4
+    imagePullPolicy: Always
+    command: ['bash','-lc','while true; do sleep 3600; done']
     tty: true
+
   volumes:
   - name: docker-config
     secret:
@@ -68,22 +73,28 @@ spec:
           podTemplate(yaml: buildPod) {
             node(POD_LABEL) {
 
-              // 1) 소스 체크아웃 (Git 자격증명 사용)
+              // 1) 소스 체크아웃
               git branch: "${GIT_BRANCH}",
-                  url: "${GIT_URL}",
-                  credentialsId: "${GIT_ID}"
+                      url: "${GIT_URL}",
+                      credentialsId: "${GIT_ID}"
 
-              // 2) Maven 빌드 (전용 컨테이너)
+              // 2) Maven 빌드 (maven 컨테이너)
               container('maven') {
                 sh '''
                   set -eux
-                  mvn -v
-                  mvn clean package -DskipTests
+                  # mvnw가 있으면 우선 사용, 없으면 mvn 사용
+                  if [ -x ./mvnw ]; then
+                    ./mvnw -v
+                    ./mvnw clean package -DskipTests
+                  else
+                    mvn -v
+                    mvn clean package -DskipTests
+                  fi
                   ls -al target/ || true
                 '''
               }
 
-              // 3) 이미지 태그 계산 (고유 태그)
+              // 3) 이미지 태그 계산
               script {
                 def ts = sh(script: "date +%Y%m%d-%H%M%S", returnStdout: true).trim()
                 env.FINAL_IMAGE_TAG = "${IMAGE_TAG}-${ts}"
@@ -91,7 +102,7 @@ spec:
                 echo "Image Reference => ${IMAGE_REF}"
               }
 
-              // 4) Kaniko로 이미지 빌드 & 푸시
+              // 4) 이미지 빌드 & 푸시 (kaniko 컨테이너)
               container('kaniko') {
                 sh """
                   /kaniko/executor \
@@ -109,7 +120,6 @@ spec:
               container('kubectl') {
                 sh '''
                   set -eux
-
                   echo "Updating image tag in k8s/deploy.yaml ..."
                   sed -Ei "s#(image:[[:space:]]*$IMAGE_REGISTRY/$IMAGE_NAME)[^[:space:]]+#\\1:$FINAL_IMAGE_TAG#" ./k8s/deploy.yaml
                   grep 'image:' ./k8s/deploy.yaml
