@@ -1,24 +1,27 @@
+# ========================================
+# Jenkins Helm Chart Values
+# Kubernetes에서 Jenkins 설치 및 설정
+# ========================================
+
+# 사용법:
+# helm repo add jenkins https://charts.jenkins.io
+# helm repo update
+# helm install jenkins jenkins/jenkins -f jenkins-values.yaml -n skala-practice
+
 controller:
-  # Service 타입 (LoadBalancer, NodePort, ClusterIP)
-  serviceType: LoadBalancer
+  # Jenkins 이미지 설정
+  image:
+    registry: docker.io
+    repository: jenkins/jenkins
+    tag: "lts-jdk17"  # 항상 최신 LTS 사용
 
-  # 초기 플러그인 설치
-  installPlugins:
-    - kubernetes:4256.v4b_a_0b_e3f_c8e5
-    - git:5.7.0
-    - credentials-binding:700.v8133766e4ac7
-    - workflow-aggregator:600.vb_57cdd26fdd7
-    - docker-workflow:580.vc0c340686b_54
+  # Jenkins Admin 계정
+  admin:
+    username: "admin"
+  # adminPassword는 설치 후 자동 생성됨
+  # 확인: kubectl get secret jenkins -n skala-practice -o jsonpath="{.data.jenkins-admin-password}" | base64 --decode
 
-  # Jenkins Controller ServiceAccount
-  serviceAccount:
-    create: true
-    name: jenkins
-
-  # Java 옵션 (초기 설정 마법사 스킵)
-  javaOpts: "-Djenkins.install.runSetupWizard=false"
-
-  # 리소스 제한
+  # 리소스 할당
   resources:
     requests:
       cpu: "500m"
@@ -27,8 +30,133 @@ controller:
       cpu: "2000m"
       memory: "4Gi"
 
-# Agent 설정 (Kaniko Pod 템플릿용)
+  # JVM 옵션
+  javaOpts: "-Xms2g -Xmx2g -XX:+UseG1GC -XX:+AlwaysPreTouch"
+
+  # Service 타입
+  serviceType: ClusterIP
+  servicePort: 8080
+
+  # Ingress 설정 (필요시 활성화)
+  ingress:
+    enabled: false
+    # hostName: jenkins.example.com
+    # tls: true
+
+  # 플러그인 자동 설치 (버전 명시 안 함 = 최신 호환 버전 자동 설치)
+  installPlugins:
+    # 필수 플러그인
+    - kubernetes
+    - workflow-aggregator
+    - git
+    - github
+    - github-branch-source
+    - configuration-as-code
+    # Credentials
+    - credentials
+    - credentials-binding
+    # Docker & Kubernetes
+    - docker-workflow
+    - kubernetes-credentials-provider
+    # Pipeline
+    - pipeline-stage-view
+    - blueocean
+    # 유틸리티
+    - timestamper
+    - ws-cleanup
+    - ansicolor
+
+  # Configuration as Code (JCasC)
+  JCasC:
+    defaultConfig: true
+    configScripts:
+      jenkins-config: |
+        jenkins:
+          systemMessage: "Jenkins for Spring Boot CI/CD with Kaniko"
+          scmCheckoutRetryCount: 3
+
+        credentials:
+          system:
+            domainCredentials:
+              - credentials:
+                  # 여기에 Credentials를 코드로 정의 가능
+                  # 하지만 보안상 UI에서 수동 등록 권장
+                  []
+
+  # Kubernetes Plugin 설정
+  clouds:
+    - kubernetes:
+        name: "kubernetes"
+        serverUrl: "https://kubernetes.default"
+        namespace: "skala-practice"
+        jenkinsUrl: "http://jenkins:8080"
+        jenkinsTunnel: "jenkins-agent:50000"
+        containerCapStr: "10"
+        podRetention: "never"
+        templates:
+          - name: "jenkins-agent"
+            namespace: "skala-practice"
+            serviceAccount: "jenkins-agent"
+            label: "jenkins-agent"
+            nodeUsageMode: NORMAL
+            containers:
+              - name: "jnlp"
+                image: "jenkins/inbound-agent:latest"
+                alwaysPullImage: true
+                workingDir: "/home/jenkins/agent"
+                resourceRequestCpu: "500m"
+                resourceRequestMemory: "512Mi"
+                resourceLimitCpu: "1000m"
+                resourceLimitMemory: "1Gi"
+
+# Agent 설정 (사용 안 함 - Kubernetes Plugin 사용)
 agent:
+  enabled: false
+
+# Persistence (선택적)
+persistence:
   enabled: true
-  namespace: skala-practice
-  serviceAccount: jenkins-agent
+  storageClass: ""  # 클러스터의 기본 StorageClass 사용
+  size: "20Gi"
+  accessMode: ReadWriteOnce
+
+# RBAC 설정
+rbac:
+  create: true
+  readSecrets: true  # Kubernetes Secrets 읽기 권한
+
+serviceAccount:
+  create: true
+  name: "jenkins"
+
+# Security Context
+securityContext:
+  runAsUser: 1000
+  fsGroup: 1000
+
+# ========================================
+# 설치 후 추가 작업
+# ========================================
+
+# 1. Admin 비밀번호 확인:
+#    kubectl get secret jenkins -n skala-practice -o jsonpath="{.data.jenkins-admin-password}" | base64 --decode
+
+# 2. Port Forward로 접속:
+#    kubectl port-forward svc/jenkins -n skala-practice 8080:8080
+
+# 3. 브라우저 접속:
+#    http://localhost:8080
+
+# 4. Credentials 등록 (JENKINS-SETUP-GUIDE.md 참조)
+
+# 5. Pipeline Job 생성
+
+# ========================================
+# 업그레이드
+# ========================================
+# helm upgrade jenkins jenkins/jenkins -f jenkins-values.yaml -n skala-practice
+
+# ========================================
+# 삭제
+# ========================================
+# helm uninstall jenkins -n skala-practice
