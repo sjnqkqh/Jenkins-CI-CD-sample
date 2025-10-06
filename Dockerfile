@@ -23,7 +23,7 @@ RUN mvn clean package -DskipTests -B
 # Stage 2: Runtime Stage
 # 빌드된 JAR 파일만을 포함한 경량 이미지 생성
 # ========================================
-FROM eclipse-temurin:17-jre-alpine
+FROM eclipse-temurin:17-jre
 
 # 작업 디렉토리 설정
 WORKDIR /app
@@ -36,12 +36,12 @@ EXPOSE 8081
 COPY --from=builder /build/target/spring-boot-app-0.0.1-SNAPSHOT.jar app.jar
 
 # 비특권 사용자로 실행 (보안 강화)
-RUN addgroup --system spring && adduser --system --ingroup spring spring
+RUN groupadd -r spring && useradd -r -g spring spring
 USER spring:spring
 
 # Health check (K8s probes를 위해 선택적)
 HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:8080/actuator/health || exit 1
+    CMD curl -f http://localhost:8080/actuator/health || exit 1
 
 # 애플리케이션 실행
 # - JVM 메모리 최적화 옵션 포함

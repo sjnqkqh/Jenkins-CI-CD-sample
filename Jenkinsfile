@@ -106,6 +106,7 @@ spec:
                               --context=\${WORKSPACE} \
                               --dockerfile=\${WORKSPACE}/Dockerfile \
                               --destination=${FULL_IMAGE_NAME} \
+                              --custom-platform=linux/amd64 \
                               --cache=true \
                               --cache-ttl=24h \
                               --compressed-caching=false \
