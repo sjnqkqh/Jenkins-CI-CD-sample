@@ -51,7 +51,7 @@ spec:
     - name: docker-config
       mountPath: /kaniko/.docker
   - name: kubectl
-    image: bitnami/kubectl:1.30
+    image: bitnami/kubectl:1.30.4
     command:
     - cat
     tty: true
