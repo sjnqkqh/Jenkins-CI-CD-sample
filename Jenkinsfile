@@ -1,5 +1,5 @@
 pipeline {
-  agent any
+  agent none  // 최상위에서는 agent를 사용하지 않음
 
   environment {
     // === Git 설정 ===
@@ -23,62 +23,38 @@ pipeline {
   }
 
   stages {
-    stage('Clone Repository') {
-      steps {
-        echo 'Clone Repository'
-        git branch: "${GIT_BRANCH}",
-                url: "${GIT_URL}",
-                credentialsId: "${GIT_ID}"
-      }
-    }
-
-    stage('Build with Maven') {
-      steps {
-        echo 'Build with Maven'
-        sh 'mvn clean package -DskipTests'
-        sh 'ls -al target/'
-      }
-    }
-
-    stage('Compute Image Tag') {
-      steps {
-        script {
-          // 타임스탬프 기반 고유 태그 생성
-          def timestamp = sh(
-                  script: "date +%Y%m%d-%H%M%S",
-                  returnStdout: true
-          ).trim()
-
-          env.FINAL_IMAGE_TAG = "${IMAGE_TAG}-${timestamp}"
-          env.IMAGE_REF = "${IMAGE_REGISTRY}/${IMAGE_NAME}:${FINAL_IMAGE_TAG}"
-
-          echo "=========================================="
-          echo "Image Reference: ${IMAGE_REF}"
-          echo "=========================================="
-        }
-      }
-    }
-
-    stage('Build & Push with Kaniko') {
-      steps {
-        script {
-          def kanikoYaml = """
+    stage('Build, Push & Deploy') {
+      agent {
+        kubernetes {
+          yaml """
 apiVersion: v1
 kind: Pod
 metadata:
-  name: kaniko
+  name: build-pod
 spec:
   serviceAccountName: jenkins-agent
   containers:
+  - name: maven
+    image: maven:3.9-eclipse-temurin-17
+    command:
+    - cat
+    tty: true
+    volumeMounts:
+    - name: maven-cache
+      mountPath: /root/.m2
   - name: kaniko
     image: gcr.io/kaniko-project/executor:v1.23.0-debug
-    imagePullPolicy: Always
     command:
     - /busybox/cat
     tty: true
     volumeMounts:
     - name: docker-config
       mountPath: /kaniko/.docker
+  - name: kubectl
+    image: bitnami/kubectl:1.30
+    command:
+    - cat
+    tty: true
   volumes:
   - name: docker-config
     secret:
@@ -86,51 +62,92 @@ spec:
       items:
       - key: .dockerconfigjson
         path: config.json
+  - name: maven-cache
+    emptyDir: {}
 """
+        }
+      }
 
-          podTemplate(yaml: kanikoYaml) {
-            node(POD_LABEL) {
-              // Git 소스 체크아웃
-              checkout scm
+      stages {
+        stage('Clone Repository') {
+          steps {
+            echo 'Clone Repository'
+            git branch: "${GIT_BRANCH}",
+                    url: "${GIT_URL}",
+                    credentialsId: "${GIT_ID}"
+          }
+        }
 
-              container('kaniko') {
-                sh """
-                  /kaniko/executor \\
-                    --context=\$(pwd) \\
-                    --dockerfile=Dockerfile \\
-                    --destination=${IMAGE_REF} \\
-                    --cache=true \\
-                    --cache-repo=${IMAGE_REGISTRY}/${IMAGE_NAME}-cache \\
-                    --snapshot-mode=redo \\
-                    --log-format=text \\
-                    --verbosity=info
-                """
-              }
+        stage('Build with Maven') {
+          steps {
+            container('maven') {
+              echo 'Build with Maven'
+              sh 'mvn clean package -DskipTests'
+              sh 'ls -al target/'
             }
           }
         }
-      }
-    }
 
-    stage('Deploy to Kubernetes') {
-      steps {
-        sh '''
-          set -eux
+        stage('Compute Image Tag') {
+          steps {
+            script {
+              // 타임스탬프 기반 고유 태그 생성
+              def timestamp = sh(
+                      script: "date +%Y%m%d-%H%M%S",
+                      returnStdout: true
+              ).trim()
 
-          echo "Updating image in k8s/deploy.yaml..."
+              env.FINAL_IMAGE_TAG = "${IMAGE_TAG}-${timestamp}"
+              env.IMAGE_REF = "${IMAGE_REGISTRY}/${IMAGE_NAME}:${FINAL_IMAGE_TAG}"
 
-          # 이미지 태그 업데이트 (sed를 사용한 in-place 치환)
-          sed -Ei "s#(image:[[:space:]]*$IMAGE_REGISTRY/$IMAGE_NAME)[^[:space:]]+#\\1:$FINAL_IMAGE_TAG#" ./k8s/deploy.yaml
+              echo "=========================================="
+              echo "Image Reference: ${IMAGE_REF}"
+              echo "=========================================="
+            }
+          }
+        }
 
-          echo "--- Updated deploy.yaml ---"
-          grep 'image:' ./k8s/deploy.yaml
+        stage('Build & Push with Kaniko') {
+          steps {
+            container('kaniko') {
+              sh """
+                /kaniko/executor \\
+                  --context=\$(pwd) \\
+                  --dockerfile=Dockerfile \\
+                  --destination=${IMAGE_REF} \\
+                  --cache=true \\
+                  --cache-repo=${IMAGE_REGISTRY}/${IMAGE_NAME}-cache \\
+                  --snapshot-mode=redo \\
+                  --log-format=text \\
+                  --verbosity=info
+              """
+            }
+          }
+        }
 
-          # Kubernetes 배포
-          kubectl apply -n ${K8S_NAMESPACE} -f ./k8s
+        stage('Deploy to Kubernetes') {
+          steps {
+            container('kubectl') {
+              sh '''
+                set -eux
 
-          # 롤아웃 완료 대기 (타임아웃 5분)
-          kubectl rollout status -n ${K8S_NAMESPACE} deployment/${IMAGE_NAME} --timeout=5m
-        '''
+                echo "Updating image in k8s/deploy.yaml..."
+
+                # 이미지 태그 업데이트 (sed를 사용한 in-place 치환)
+                sed -Ei "s#(image:[[:space:]]*$IMAGE_REGISTRY/$IMAGE_NAME)[^[:space:]]+#\\\\1:$FINAL_IMAGE_TAG#" ./k8s/deploy.yaml
+
+                echo "--- Updated deploy.yaml ---"
+                grep 'image:' ./k8s/deploy.yaml
+
+                # Kubernetes 배포
+                kubectl apply -n ${K8S_NAMESPACE} -f ./k8s
+
+                # 롤아웃 완료 대기 (타임아웃 5분)
+                kubectl rollout status -n ${K8S_NAMESPACE} deployment/${IMAGE_NAME} --timeout=5m
+              '''
+            }
+          }
+        }
       }
     }
   }
