@@ -3,8 +3,16 @@ kind: Deployment
 metadata:
   name: sk077-myfirst-api-server
   namespace: skala-practice
+  labels:
+    app: sk077-myfirst-api-server
+    version: v1
 spec:
-  replicas: 1
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   selector:
     matchLabels:
       app: sk077-myfirst-api-server
@@ -14,19 +22,67 @@ spec:
         prometheus.io/scrape: 'true'
         prometheus.io/port: '8080'
         prometheus.io/path: '/actuator/prometheus'
-        update: 8aae731d
       labels:
         app: sk077-myfirst-api-server
+        version: v1
     spec:
       serviceAccountName: default
+      # Harbor Registry Pull Secret
+      imagePullSecrets:
+      - name: harbor-registry-secret
       containers:
       - name: myfirst-api-server
-        image: amdp-registry.skala-ai.com/skala25a/sk077-myfirst-api-server:1.0.0
+        image: amdp-registry.skala-ai.com/skala25a/sk077-myfirst-api-server:latest
         imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        - name: mgmt
+          containerPort: 8081
+          protocol: TCP
         env:
         - name: USER_NAME
           value: sk077
         - name: NAMESPACE
           value: skala-practice
-        - name: SPRING_PROFILES_ACTIVE  
-          value: "prod"  
+        - name: SPRING_PROFILES_ACTIVE
+          value: "prod"
+        # JVM 메모리 설정 (리소스 limit 기반)
+        - name: JAVA_OPTS
+          value: "-XX:MaxRAMPercentage=75.0 -XX:+UseContainerSupport"
+        # 리소스 제한
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        # Liveness Probe: 애플리케이션이 살아있는지 확인
+        livenessProbe:
+          httpGet:
+            path: /actuator/health/liveness
+            port: 8080
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        # Readiness Probe: 트래픽 수신 준비 확인
+        readinessProbe:
+          httpGet:
+            path: /actuator/health/readiness
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        # Startup Probe: 초기 구동 시간이 긴 경우
+        startupProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 10  
