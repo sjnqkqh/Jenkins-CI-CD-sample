@@ -25,14 +25,24 @@ spec:
     volumeMounts:
     - name: docker-config
       mountPath: /kaniko/.docker
+    - name: workspace-volume
+      mountPath: /home/jenkins/agent
   # kubectl 컨테이너: K8S 배포
   - name: kubectl
     image: bitnami/kubectl:latest
     imagePullPolicy: Always
     command:
+    - /bin/sh
+    - -c
+    args:
     - cat
     tty: true
+    volumeMounts:
+    - name: workspace-volume
+      mountPath: /home/jenkins/agent
   volumes:
+  - name: workspace-volume
+    emptyDir: {}
   - name: docker-config
     secret:
       secretName: harbor-registry-secret
