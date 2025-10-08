@@ -1,216 +1,98 @@
-// ========================================
-// Jenkins Pipeline for Spring Boot with Kaniko
-// CI/CD: Build → Push to Registry → Deploy to K8S
-// ========================================
-
 pipeline {
-    agent {
-        kubernetes {
-            yaml '''
-apiVersion: v1
-kind: Pod
-metadata:
-  labels:
-    jenkins: agent
-spec:
-  serviceAccountName: jenkins-agent
-  containers:
-  # Kaniko 컨테이너: Docker 이미지 빌드 & Push
-  - name: kaniko
-    image: gcr.io/kaniko-project/executor:debug
-    imagePullPolicy: Always
-    command:
-    - /busybox/cat
-    tty: true
-    volumeMounts:
-    - name: docker-config
-      mountPath: /kaniko/.docker
-  # kubectl 컨테이너: K8S 배포
-  - name: kubectl
-    image: lachlanevenson/k8s-kubectl:latest
-    imagePullPolicy: Always
-    command:
-    - cat
-    tty: true
-  volumes:
-  - name: docker-config
-    secret:
-      secretName: harbor-registry-secret
-      items:
-      - key: .dockerconfigjson
-        path: config.json
-'''
-        }
-    }
+    agent any
 
     environment {
-        // ========================================
-        // 환경 변수 설정
-        // ========================================
+        // === 사용자 수정 영역 ===
+        GIT_URL                = 'https://github.com/qoqomi/myfirst-api-server.git'
+        GIT_BRANCH             = 'main'            // 또는 main
+        GIT_ID                 = 'skala-github-id'   // GitHub PAT credential ID
+        IMAGE_NAME             = 'sk077-myfirst-api-server'
+        // =======================
+        IMAGE_TAG              = '1.0.0'
+        IMAGE_REGISTRY_URL     = 'amdp-registry.skala-ai.com'
+        IMAGE_REGISTRY_PROJECT = 'skala25a'
 
-        // 애플리케이션 정보
-        APP_NAME = 'sk077-myfirst-api-server'
+        DOCKER_CREDENTIAL_ID   = 'skala-image-registry-id'  // Harbor 인증 정보 ID
+        K8S_NAMESPACE          = 'skala-practice'
+    }
 
-        // Harbor Registry 설정 (현재 사용 중)
-        HARBOR_REGISTRY = 'amdp-registry.skala-ai.com'
-        HARBOR_PROJECT = 'skala25a'
-
-        // Kubernetes 설정
-        K8S_NAMESPACE = 'skala-practice'
-
-        // 이미지 태그 생성 (타임스탬프 기반)
-        IMAGE_TAG = "${env.BUILD_NUMBER}-${new Date().format('yyyyMMdd-HHmmss')}"
-
-        // 최종 이미지 이름 (Harbor Registry)
-        FULL_IMAGE_NAME = "${HARBOR_REGISTRY}/${HARBOR_PROJECT}/${APP_NAME}:${IMAGE_TAG}"
+    options {
+        disableConcurrentBuilds()
+        timestamps()
     }
 
     stages {
-        // ========================================
-        // Stage 1: Git Clone
-        // ========================================
-        stage('Checkout') {
+        stage('Clone Repository') {
             steps {
-                echo "=========================================="
-                echo "Stage: Git Checkout"
-                echo "=========================================="
+                echo 'Clone Repository'
+                git branch: "${GIT_BRANCH}", url: "${GIT_URL}", credentialsId: "${GIT_ID}"
+                sh 'ls -al'
+            }
+        }
 
-                checkout scm
+        stage('Build with Maven') {
+            steps {
+                echo 'Build with Maven'
+                sh 'mvn clean package -DskipTests'
+                sh 'ls -al'
+            }
+        }
 
+        // 태그/이미지 경로 계산 (메타)
+        stage('Compute Image Meta') {
+            steps {
                 script {
-                    // Git 정보 출력
-                    sh '''
-                        echo "Branch: ${GIT_BRANCH}"
-                        echo "Commit: ${GIT_COMMIT}"
-                        git log -1 --pretty=format:"%h - %an, %ar : %s"
-                    '''
+                    def hashcode = sh(script: "date +%s%N | sha256sum | cut -c1-12", returnStdout: true).trim()
+                    env.FINAL_IMAGE_TAG = "${IMAGE_TAG}-${hashcode}"
+                    env.IMAGE_REGISTRY  = "${env.IMAGE_REGISTRY_URL}/${env.IMAGE_REGISTRY_PROJECT}"
+                    env.REG_HOST        = env.IMAGE_REGISTRY_URL
+                    env.IMAGE_REF       = "${env.IMAGE_REGISTRY}/${IMAGE_NAME}:${env.FINAL_IMAGE_TAG}"
+
+                    echo "REG_HOST: ${env.REG_HOST}"
+                    echo "IMAGE_REF: ${env.IMAGE_REF}"
                 }
             }
         }
 
-        // ========================================
-        // Stage 2: Build & Push Docker Image (Kaniko)
-        // ========================================
-        stage('Build & Push Image') {
+
+        // 로그인/빌드/푸시/정리
+        // 하버에 푸시하는거임\
+        // docker -> 데몬한테 요청 및 실행
+        // buildah === Kaniko
+        //
+        stage('Image Build & Push (docker)') {
             steps {
-                echo "=========================================="
-                echo "Stage: Build & Push Docker Image"
-                echo "Image: ${FULL_IMAGE_NAME}"
-                echo "=========================================="
-
-                container('kaniko') {
-                    script {
-                        // Kaniko를 사용한 이미지 빌드 & Push
-                        sh """
-                            /kaniko/executor \
-                              --context=\${WORKSPACE} \
-                              --dockerfile=\${WORKSPACE}/Dockerfile \
-                              --destination=${FULL_IMAGE_NAME} \
-                              --custom-platform=linux/amd64 \
-                              --cache=true \
-                              --cache-ttl=24h \
-                              --compressed-caching=false \
-                              --cleanup
-                        """
-
-                        echo "✅ Image built and pushed successfully: ${FULL_IMAGE_NAME}"
+                script {
+                    docker.withRegistry("https://${IMAGE_REGISTRY}", "${DOCKER_CREDENTIAL_ID}") {
+                        def appImage = docker.build("${IMAGE_REF}", "--platform=linux/amd64 .")
+                        appImage.push()
                     }
                 }
             }
         }
 
-        // ========================================
-        // Stage 3: Update Kubernetes Manifests
-        // ========================================
-        stage('Update K8S Manifests') {
+        // k8s 리소스 파일(deploy.yaml) 수정 및 배포
+        stage('Deploy to Kubernetes') {
             steps {
-                echo "=========================================="
-                echo "Stage: Update Kubernetes Deployment"
-                echo "=========================================="
+                sh '''
+            set -eux
+            test -f ./k8s/deploy.yaml
 
-                script {
-                    // deployment.yaml 파일에서 이미지 태그 업데이트
-                    sh """
-                        sed -i 's|image: .*/${APP_NAME}:.*|image: ${FULL_IMAGE_NAME}|g' k8s/deploy.yaml
+            echo "--- BEFORE ---"
+            grep -n 'image:' ./k8s/deploy.yaml || true
 
-                        # 업데이트된 매니페스트 확인
-                        echo "Updated deployment manifest:"
-                        grep "image:" k8s/deploy.yaml
-                    """
-                }
+            # IMAGE_REGISTRY/IMAGE_NAME 패턴의 태그를 FINAL_IMAGE_TAG 로 치환
+            sed -Ei "s#(image:[[:space:]]*$IMAGE_REGISTRY/$IMAGE_NAME)[^[:space:]]+#\\1:$FINAL_IMAGE_TAG#" ./k8s/deploy.yaml
+
+            echo "--- AFTER ---"
+            grep -n 'image:' ./k8s/deploy.yaml || true
+
+            kubectl apply -n ${K8S_NAMESPACE} -f ./k8s
+            kubectl rollout status -n ${K8S_NAMESPACE} deployment/${IMAGE_NAME}
+        '''
             }
         }
 
-        // ========================================
-        // Stage 4: Deploy to Kubernetes
-        // ========================================
-        stage('Deploy to K8S') {
-            steps {
-                echo "=========================================="
-                echo "Stage: Deploy to Kubernetes"
-                echo "Namespace: ${K8S_NAMESPACE}"
-                echo "=========================================="
-
-                container('kubectl') {
-                    script {
-                        // K8S 매니페스트 적용
-                        sh """
-                            # RBAC 설정 적용 (최초 1회)
-                            kubectl apply -f k8s/jenkins-rbac.yaml
-
-                            # 애플리케이션 배포
-                            kubectl apply -f k8s/deploy.yaml -n ${K8S_NAMESPACE}
-                            kubectl apply -f k8s/service.yaml -n ${K8S_NAMESPACE}
-
-                            # 배포 상태 확인
-                            kubectl rollout status deployment/${APP_NAME} -n ${K8S_NAMESPACE} --timeout=300s
-
-                            # 배포된 Pod 확인
-                            echo "\\n=== Deployed Pods ==="
-                            kubectl get pods -n ${K8S_NAMESPACE} -l app=${APP_NAME}
-
-                            # Service 확인
-                            echo "\\n=== Service Info ==="
-                            kubectl get svc -n ${K8S_NAMESPACE} ${APP_NAME}
-                        """
-
-                        echo "✅ Deployment completed successfully!"
-                    }
-                }
-            }
-        }
-    }
-
-    // ========================================
-    // Post Actions
-    // ========================================
-    post {
-        success {
-            echo """
-            ========================================
-            ✅ Pipeline completed successfully!
-            ========================================
-            Application: ${APP_NAME}
-            Image: ${FULL_IMAGE_NAME}
-            Namespace: ${K8S_NAMESPACE}
-            Build Number: ${env.BUILD_NUMBER}
-            ========================================
-            """
-        }
-        failure {
-            echo """
-            ========================================
-            ❌ Pipeline failed!
-            ========================================
-            Check the logs above for details.
-            Build Number: ${env.BUILD_NUMBER}
-            ========================================
-            """
-        }
-        always {
-            // 워크스페이스 정리 (선택적)
-            // cleanWs()
-            echo "Pipeline execution finished."
-        }
     }
 }
+
